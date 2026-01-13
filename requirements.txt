@@ -1,4 +1,4 @@
-streamlit>=1.30
+streamlit
 pandas
-sqlite3-binary
+mysql-connector-python
 reportlab
