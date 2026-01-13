@@ -1,214 +1,181 @@
 import streamlit as st
-import mysql.connector
+import sqlite3
+import pandas as pd
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+import os
 
-# ------------------ SESSION INIT ------------------
-if "admin_logged_in" not in st.session_state:
-    st.session_state["admin_logged_in"] = False
-
-# ------------------ ADMIN CREDENTIALS ------------------
+# ---------------- CONFIG ----------------
 ADMIN_USER = "Abhishek"
-ADMIN_PASS = "12345"  # Change your password here
+ADMIN_PASS = "abhi8813"
 
-# ------------------ PAGE CONFIG ------------------
-st.set_page_config(
-    page_title="MP Board Result System",
-    layout="centered",
-    page_icon="🎓"
+st.set_page_config("MP Board Result System", layout="wide")
+
+# ---------------- DB ----------------
+conn = sqlite3.connect("result.db", check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS students (
+    roll INTEGER PRIMARY KEY,
+    name TEXT,
+    father TEXT,
+    dob TEXT,
+    hindi INTEGER,
+    english INTEGER,
+    maths INTEGER,
+    science INTEGER
 )
+""")
+conn.commit()
 
-st.title("🎓 MP Board Result System")
-st.markdown("---")
+# ---------------- FUNCTIONS ----------------
+def calculate_result(marks):
+    if any(m < 33 for m in marks):
+        return "FAIL", "—"
+    percent = sum(marks) / 4
+    if percent >= 60:
+        return "PASS", "FIRST DIVISION"
+    elif percent >= 45:
+        return "PASS", "SECOND DIVISION"
+    else:
+        return "PASS", "THIRD DIVISION"
 
-# ------------------ DATABASE CONNECTION ------------------
-def get_connection():
-    return mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="abhi123",      # Set your MySQL password
-        database="result_system"
-    )
+def generate_pdf(data):
+    roll, name, father, dob, h, e, m, s = data
+    marks = [h, e, m, s]
+    result, division, percent, grade = calculate_result(marks)
 
-# ------------------ TABS ------------------
-tab1, tab2 = st.tabs(["🔐 Admin Login", "📄 Student Result"])
+    total = sum(marks)
+    c.drawString(50, y, f"Percentage: {percent:.2f}%")
+    y -= 25
+    c.drawString(50, y, f"Grade: {grade}")
+    y -= 25
+    c.drawString(50, y, f"Result: {result}")
+    c.drawString(300, y, f"Division: {division}")
 
-# ================= ADMIN LOGIN =================
+
+    file_name = f"Marksheet_{roll}.pdf"
+    c = canvas.Canvas(file_name, pagesize=A4)
+    c.setFont("Helvetica", 12)
+
+    c.drawCentredString(300, 800, "MP BOARD RESULT 2026")
+    c.line(50, 790, 550, 790)
+
+    y = 750
+    c.drawString(50, y, f"Roll No: {roll}")
+    c.drawString(300, y, f"Name: {name}")
+    y -= 30
+    c.drawString(50, y, f"Father Name: {father}")
+    c.drawString(300, y, f"DOB: {dob}")
+    y -= 40
+
+    subjects = ["Hindi", "English", "Maths", "Science"]
+    for sub, mark in zip(subjects, marks):
+        c.drawString(80, y, sub)
+        c.drawString(300, y, str(mark))
+        y -= 25
+
+    y -= 20
+    c.drawString(50, y, f"Total Marks: {total}/400")
+    y -= 25
+    c.drawString(50, y, f"Result: {result}")
+    c.drawString(300, y, f"Division: {division}")
+
+    c.showPage()
+    c.save()
+    return file_name
+
+# ---------------- SESSION ----------------
+if "admin_logged_in" not in st.session_state:
+    st.session_state.admin_logged_in = False
+
+# ---------------- UI ----------------
+st.markdown("<h2 style='text-align:center'>MP BOARD RESULT SYSTEM 2026</h2>", unsafe_allow_html=True)
+tab1, tab2 = st.tabs(["🔐 Admin Panel", "🎓 Student Result"])
+
+# ================= ADMIN =================
 with tab1:
-    st.header("🔐 Admin Login")
-
-    if not st.session_state["admin_logged_in"]:
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
+    if not st.session_state.admin_logged_in:
+        st.subheader("Admin Login")
+        u = st.text_input("Username")
+        p = st.text_input("Password", type="password")
 
         if st.button("Login"):
-            if username == ADMIN_USER and password == ADMIN_PASS:
-                st.session_state["admin_logged_in"] = True
+            if u == ADMIN_USER and p == ADMIN_PASS:
+                st.session_state.admin_logged_in = True
                 st.success("✅ Login Successful")
-                st.experimental_rerun()
             else:
-                st.error("❌ Invalid Username or Password")
-
+                st.error("❌ Invalid Credentials")
     else:
-        st.success("🟢 Admin Logged In")
+        st.subheader("Enter Student Result")
+
+        roll = st.number_input("Roll Number", step=1)
+        name = st.text_input("Student Name")
+        father = st.text_input("Father Name")
+        import datetime
+
+        dob = st.date_input(
+           "Date of Birth",
+        min_value=datetime.date(2000, 1, 1)
+               )
+
+
+        col1, col2 = st.columns(2)
+        with col1:
+            hindi = st.number_input("Hindi", 0, 100)
+            english = st.number_input("English", 0, 100)
+        with col2:
+            maths = st.number_input("Maths", 0, 100)
+            science = st.number_input("Science", 0, 100)
+
+        if st.button("Save Result"):
+            cursor.execute("""
+            INSERT OR REPLACE INTO students
+            VALUES (?,?,?,?,?,?,?,?)
+            """, (roll, name, father, dob, hindi, english, maths, science))
+            conn.commit()
+            st.success("✅ Result Saved")
 
         if st.button("Logout"):
-            st.session_state["admin_logged_in"] = False
-            st.experimental_rerun()
+            st.session_state.admin_logged_in = False
 
-        st.markdown("---")
-        st.header("🛠️ Admin Panel – Add / Update Result")
-
-        # --------- STUDENT DETAILS INPUT ----------
-        roll_no = st.text_input("Roll Number")
-        student_name = st.text_input("Student Name")
-        father_name = st.text_input("Father Name")
-        school_name = st.text_input("School Name")
-        dob = st.date_input("Date of Birth")
-
-        st.subheader("📊 Subject Marks")
-        hindi = st.number_input("Hindi", 0, 100)
-        english = st.number_input("English", 0, 100)
-        maths = st.number_input("Maths", 0, 100)
-        science = st.number_input("Science", 0, 100)
-        social = st.number_input("Social Science", 0, 100)
-
-        if st.button("💾 Save Result"):
-            if not roll_no.isdigit():
-                st.error("Roll Number must be numeric")
-                st.stop()
-            
-            roll_no = int(roll_no)
-            subjects = ["Hindi", "English", "Maths", "Science", "Social Science"]
-            marks_list = [hindi, english, maths, science, social]
-
-            total = sum(marks_list)
-            percentage = total / 5
-
-            failed = [subjects[i] for i, m in enumerate(marks_list) if m < 33]
-
-            if failed:
-                result_status = "FAIL"
-                division = "No Division"
-            else:
-                result_status = "PASS"
-                if percentage >= 60:
-                    division = "First Division"
-                elif percentage >= 45:
-                    division = "Second Division"
-                else:
-                    division = "Third Division"
-
-            if percentage >= 90:
-                grade = "A+"
-            elif percentage >= 75:
-                grade = "A"
-            elif percentage >= 60:
-                grade = "B"
-            elif percentage >= 45:
-                grade = "C"
-            elif percentage >= 33:
-                grade = "D"
-            else:
-                grade = "F"
-
-            conn = get_connection()
-            cursor = conn.cursor()
-
-            # INSERT / UPDATE STUDENT DETAILS
-            cursor.execute(
-                "REPLACE INTO students VALUES (%s,%s,%s,%s,%s)",
-                (roll_no, student_name, father_name, school_name, dob)
-            )
-
-            # INSERT / UPDATE MARKS
-            cursor.execute("DELETE FROM marks WHERE roll_no=%s", (roll_no,))
-            for sub, mark in zip(subjects, marks_list):
-                cursor.execute(
-                    "INSERT INTO marks VALUES (%s,%s,%s)",
-                    (roll_no, sub, mark)
-                )
-
-            # INSERT / UPDATE RESULT SUMMARY
-            cursor.execute(
-                "REPLACE INTO result_summary VALUES (%s,%s,%s,%s,%s,%s)",
-                (roll_no, total, percentage, result_status, division, grade)
-            )
-
-            conn.commit()
-            cursor.close()
-            conn.close()
-
-            st.success("✅ Result Saved Successfully")
-
-# ================= STUDENT RESULT =================
+# ================= STUDENT =================
 with tab2:
-    st.header("📄 Student Result (Roll No Wise)")
+    st.subheader("Check Result")
+    r = st.number_input("Enter Roll Number", step=1)
 
-    roll_search = st.text_input("Enter Roll Number")
-
-    if st.button("🔍 View Result"):
-        if not roll_search.isdigit():
-            st.error("Roll Number must be numeric")
-            st.stop()
-
-        roll_search = int(roll_search)
-
-        conn = get_connection()
-        cursor = conn.cursor()
-
-        query = """
-        SELECT s.roll_no, s.student_name, s.father_name, s.school_name, s.dob,
-               m.subject, m.marks,
-               r.total, r.percentage, r.result_status, r.division, r.grade
-        FROM students s
-        JOIN marks m ON s.roll_no = m.roll_no
-        JOIN result_summary r ON s.roll_no = r.roll_no
-        WHERE s.roll_no = %s
-        """
-
-        cursor.execute(query, (roll_search,))
-        data = cursor.fetchall()
+    if st.button("Show Result"):
+        cursor.execute("SELECT * FROM students WHERE roll=?", (r,))
+        data = cursor.fetchone()
 
         if not data:
             st.error("❌ Result Not Found")
         else:
-            first = data[0]
+            roll, name, father, dob, h, e, m, s = data
+            marks = [h, e, m, s]
+            result, division = calculate_result(marks)
+            total = sum(marks)
 
-            st.subheader("🧾 Student Details")
-            st.write(f"Roll No : {first[0]}")
-            st.write(f"Name : {first[1]}")
-            st.write(f"Father Name : {first[2]}")
-            st.write(f"School : {first[3]}")
-            st.write(f"DOB : {first[4]}")
+            st.write(f"**Name:** {name}")
+            st.write(f"**Father Name:** {father}")
+            st.write(f"**DOB:** {dob}")
 
-            st.markdown("---")
+            df = pd.DataFrame({
+                "Subject": ["Hindi", "English", "Maths", "Science"],
+                "Marks": marks,
+                "Status": ["FAIL" if x < 33 else "PASS" for x in marks]
+            })
 
-            table = []
-            failed = []
+            st.dataframe(df)
+            st.success(f"Total: {total}/400")
 
-            for row in data:
-                status = "FAIL" if row[6] < 33 else "PASS"
-                if status == "FAIL":
-                    failed.append(row[5])
-                table.append({
-                    "Subject": row[5],
-                    "Marks": row[6],
-                    "Status": status
-                })
-
-            st.table(table)
-
-            st.markdown("---")
-            st.subheader("🏆 Result Summary")
-            st.write(f"Total : {first[7]}")
-            st.write(f"Percentage : {first[8]}%")
-            st.write(f"Result : {first[9]}")
-            st.write(f"Division : {first[10]}")
-            st.write(f"Grade : {first[11]}")
-
-            if failed:
-                st.error("❌ Failed In: " + ", ".join(failed))
+            if result == "PASS":
+                st.success(f"RESULT: PASS | {division}")
             else:
-                st.success("✅ Passed All Subjects")
+                st.error("RESULT: FAIL")
 
-        cursor.close()
-        conn.close()
+            if st.button("📄 Download PDF Marksheet"):
+                pdf = generate_pdf(data)
+                with open(pdf, "rb") as f:
+                    st.download_button("Download PDF", f, file_name=pdf)
