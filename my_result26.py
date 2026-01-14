@@ -1,4 +1,10 @@
 import streamlit as st
+st.set_page_config(
+    page_title="Result System",
+    page_icon="favicon.png",
+    layout="wide"
+)
+
 import sqlite3
 import json
 import datetime
