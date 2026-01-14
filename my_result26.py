@@ -1,97 +1,86 @@
 import streamlit as st
 import sqlite3
+import json
+import datetime
 import pandas as pd
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-import os
 
 # ---------------- CONFIG ----------------
 ADMIN_USER = "Abhishek"
 ADMIN_PASS = "abhi8813"
 
-st.set_page_config("MP Board Result System", layout="wide")
+st.set_page_config(page_title="Result System", layout="wide")
 
 # ---------------- DB ----------------
 conn = sqlite3.connect("result.db", check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
+CREATE TABLE IF NOT EXISTS settings (
+    id INTEGER PRIMARY KEY,
+    title TEXT
+)
+""")
+
+cursor.execute("""
 CREATE TABLE IF NOT EXISTS students (
     roll INTEGER PRIMARY KEY,
+    school TEXT,
     name TEXT,
     father TEXT,
     dob TEXT,
-    hindi INTEGER,
-    english INTEGER,
-    maths INTEGER,
-    science INTEGER
+    subjects TEXT
 )
 """)
 conn.commit()
 
+# default title
+cursor.execute("SELECT title FROM settings WHERE id=1")
+row = cursor.fetchone()
+if not row:
+    cursor.execute("INSERT INTO settings VALUES (1, ?)", ("MP BOARD RESULT SYSTEM 2026",))
+    conn.commit()
+
 # ---------------- FUNCTIONS ----------------
-def calculate_result(marks):
-    if any(m < 33 for m in marks):
-        return "FAIL", "—"
-    percent = sum(marks) / 4
-    if percent >= 60:
-        return "PASS", "FIRST DIVISION"
-    elif percent >= 45:
-        return "PASS", "SECOND DIVISION"
-    else:
-        return "PASS", "THIRD DIVISION"
-
-def generate_pdf(data):
-    roll, name, father, dob, h, e, m, s = data
-    marks = [h, e, m, s]
-    result, division, percent, grade = calculate_result(marks)
-
+def calculate_result(subjects):
+    marks = list(subjects.values())
     total = sum(marks)
-    c.drawString(50, y, f"Percentage: {percent:.2f}%")
-    y -= 25
-    c.drawString(50, y, f"Grade: {grade}")
-    y -= 25
-    c.drawString(50, y, f"Result: {result}")
-    c.drawString(300, y, f"Division: {division}")
+    percent = total / len(marks)
 
+    if any(m < 33 for m in marks):
+        result = "FAIL"
+        division = "-"
+    else:
+        result = "PASS"
+        if percent >= 60:
+            division = "FIRST DIVISION"
+        elif percent >= 45:
+            division = "SECOND DIVISION"
+        else:
+            division = "THIRD DIVISION"
 
-    file_name = f"Marksheet_{roll}.pdf"
-    c = canvas.Canvas(file_name, pagesize=A4)
-    c.setFont("Helvetica", 12)
+    if percent >= 75:
+        grade = "A+"
+    elif percent >= 60:
+        grade = "A"
+    elif percent >= 45:
+        grade = "B"
+    elif percent >= 33:
+        grade = "C"
+    else:
+        grade = "D"
 
-    c.drawCentredString(300, 800, "MP BOARD RESULT 2026")
-    c.line(50, 790, 550, 790)
-
-    y = 750
-    c.drawString(50, y, f"Roll No: {roll}")
-    c.drawString(300, y, f"Name: {name}")
-    y -= 30
-    c.drawString(50, y, f"Father Name: {father}")
-    c.drawString(300, y, f"DOB: {dob}")
-    y -= 40
-
-    subjects = ["Hindi", "English", "Maths", "Science"]
-    for sub, mark in zip(subjects, marks):
-        c.drawString(80, y, sub)
-        c.drawString(300, y, str(mark))
-        y -= 25
-
-    y -= 20
-    c.drawString(50, y, f"Total Marks: {total}/400")
-    y -= 25
-    c.drawString(50, y, f"Result: {result}")
-    c.drawString(300, y, f"Division: {division}")
-
-    c.showPage()
-    c.save()
-    return file_name
+    return total, percent, result, division, grade
 
 # ---------------- SESSION ----------------
 if "admin_logged_in" not in st.session_state:
     st.session_state.admin_logged_in = False
 
-# ---------------- UI ----------------
-st.markdown("<h2 style='text-align:center'>MP BOARD RESULT SYSTEM 2026</h2>", unsafe_allow_html=True)
+# ---------------- TITLE ----------------
+cursor.execute("SELECT title FROM settings WHERE id=1")
+APP_TITLE = cursor.fetchone()[0]
+
+st.markdown(f"<h2 style='text-align:center'>{APP_TITLE}</h2>", unsafe_allow_html=True)
+
 tab1, tab2 = st.tabs(["🔐 Admin Panel", "🎓 Student Result"])
 
 # ================= ADMIN =================
@@ -104,38 +93,50 @@ with tab1:
         if st.button("Login"):
             if u == ADMIN_USER and p == ADMIN_PASS:
                 st.session_state.admin_logged_in = True
-                st.success("✅ Login Successful")
+                st.success("Login Successful")
             else:
-                st.error("❌ Invalid Credentials")
+                st.error("Invalid Credentials")
     else:
+        st.subheader("Admin Settings")
+
+        # Change heading
+        new_title = st.text_input("Change Heading Title", APP_TITLE)
+        if st.button("Update Title"):
+            cursor.execute("UPDATE settings SET title=? WHERE id=1", (new_title,))
+            conn.commit()
+            st.success("Title Updated (Refresh page)")
+
+        st.divider()
         st.subheader("Enter Student Result")
 
+        school = st.text_input("School Name")
         roll = st.number_input("Roll Number", step=1)
         name = st.text_input("Student Name")
         father = st.text_input("Father Name")
-        import datetime
+        dob = st.date_input("Date of Birth", min_value=datetime.date(2000, 1, 1))
 
-        dob = st.date_input(
-           "Date of Birth",
-        min_value=datetime.date(2000, 1, 1)
-               )
+        st.markdown("### Enter 5 Subjects")
 
-
-        col1, col2 = st.columns(2)
-        with col1:
-            hindi = st.number_input("Hindi", 0, 100)
-            english = st.number_input("English", 0, 100)
-        with col2:
-            maths = st.number_input("Maths", 0, 100)
-            science = st.number_input("Science", 0, 100)
+        subjects = {}
+        for i in range(1, 6):
+            col1, col2 = st.columns(2)
+            with col1:
+                sub = st.text_input(f"Subject {i} Name")
+            with col2:
+                mark = st.number_input(f"Marks {i}", 0, 100, key=f"m{i}")
+            if sub:
+                subjects[sub] = mark
 
         if st.button("Save Result"):
-            cursor.execute("""
-            INSERT OR REPLACE INTO students
-            VALUES (?,?,?,?,?,?,?,?)
-            """, (roll, name, father, dob, hindi, english, maths, science))
-            conn.commit()
-            st.success("✅ Result Saved")
+            if len(subjects) != 5:
+                st.error("Exactly 5 subjects required")
+            else:
+                cursor.execute(
+                    "INSERT OR REPLACE INTO students VALUES (?,?,?,?,?,?)",
+                    (roll, school, name, father, str(dob), json.dumps(subjects))
+                )
+                conn.commit()
+                st.success("Result Saved Successfully")
 
         if st.button("Logout"):
             st.session_state.admin_logged_in = False
@@ -150,32 +151,30 @@ with tab2:
         data = cursor.fetchone()
 
         if not data:
-            st.error("❌ Result Not Found")
+            st.error("Result Not Found")
         else:
-            roll, name, father, dob, h, e, m, s = data
-            marks = [h, e, m, s]
-            result, division = calculate_result(marks)
-            total = sum(marks)
+            roll, school, name, father, dob, subjects_json = data
+            subjects = json.loads(subjects_json)
 
+            total, percent, result, division, grade = calculate_result(subjects)
+
+            st.write(f"**School:** {school}")
             st.write(f"**Name:** {name}")
             st.write(f"**Father Name:** {father}")
             st.write(f"**DOB:** {dob}")
 
             df = pd.DataFrame({
-                "Subject": ["Hindi", "English", "Maths", "Science"],
-                "Marks": marks,
-                "Status": ["FAIL" if x < 33 else "PASS" for x in marks]
+                "Subject": subjects.keys(),
+                "Marks": subjects.values(),
+                "Status": ["PASS" if m >= 33 else "FAIL" for m in subjects.values()]
             })
+            st.dataframe(df, use_container_width=True)
 
-            st.dataframe(df)
-            st.success(f"Total: {total}/400")
+            st.success(f"Total Marks: {total}")
+            st.info(f"Percentage: {percent:.2f}%")
+            st.info(f"Grade: {grade}")
 
             if result == "PASS":
                 st.success(f"RESULT: PASS | {division}")
             else:
                 st.error("RESULT: FAIL")
-
-            if st.button("📄 Download PDF Marksheet"):
-                pdf = generate_pdf(data)
-                with open(pdf, "rb") as f:
-                    st.download_button("Download PDF", f, file_name=pdf)
